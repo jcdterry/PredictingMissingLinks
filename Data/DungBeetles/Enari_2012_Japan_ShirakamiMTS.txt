@@ -1,0 +1,1 @@
+	Macaque	bear	serow	cattleP_auratus	1	0	0	0P_laevistriatus	6	1	1	0O_ater	7	0	13	0A_superatratus	2	0	2	0A_hasegawai	1	0	0	0A_eccoptus	357	0	16	1A_unifasciatus	0	0	6	0A_uniformis	0	0	1	0

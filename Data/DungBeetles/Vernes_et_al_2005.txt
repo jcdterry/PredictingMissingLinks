@@ -1,0 +1,12 @@
+	Isoodon_macrourus	Bettongia_tropica	Uromys_caudimaculatus_	Perameles_nasuta	Dasyurus_hallucatus
+Coptodactyla_subaenea	262	108	35	0	4
+Coptodactyla_glabricollis	33	13	0	0	0
+Onthophagus_bornemisszanus	5	23	1	0	0
+Temnoplectron_politulum	1	8	1	12	0
+Onthophagus_bicornis	0	21	0	0	0
+Temnoplectron_rotundum	5	1	0	0	0
+Coptodactyla_monstrosa	1	1	0	0	0
+Onthophagus_jangga	0	2	0	0	0
+Onthophagus_muticus	2	0	0	0	0
+Coptodactyla_onitoides	0	1	0	0	0
+Onthophagus_tricavicollis	0	1	0	0	0

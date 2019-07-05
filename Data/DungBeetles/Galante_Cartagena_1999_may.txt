@@ -1,0 +1,14 @@
+	cattle	rabbit
+Onthophagus_emarginatus	81	34
+Aphodius_lusitanicus	0	76
+Onthophagus_merdarius	43	0
+Onthophagus_furcatus	42	0
+Onthophagus_opacicollis	14	0
+Trox_perlatus_hispanicus	11	0
+Onthophagus_taurus	8	0
+Thorectes_intermedius	3	5
+Scarabaeus_sacer	6	0
+Onthophagus_lemur	5	0
+Aphodius_ibericus	0	3
+Trox_hispidus	1	0
+Aphodius_granarius	1	0

@@ -1,0 +1,1 @@
+	ruminant	zebra	elephantHeliocopris_haroldi	0	3	5Heliocopris_andersonii	2	11	12Heliocopris_hamadryas	10	0	10Heteronitis_castalnaui	8	6	6Oniticellus_egregrius	0	0	18Onitis_paramniszechi	1	10	4

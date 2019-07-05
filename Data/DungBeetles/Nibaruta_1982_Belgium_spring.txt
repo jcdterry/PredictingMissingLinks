@@ -1,0 +1,1 @@
+	bongo	nyala	eland	giant_eland	zebu	cattlespec1	0	0	0	0	0	1spec2	5	1	7	2	0	4spec3	0	0	0	0	0	0spec4	0	0	0	0	0	0spec5	0	0	0	0	1	5spec6	2	0	2	8	0	8spec7	1	0	0	0	0	21spec8	0	0	0	0	0	0spec9	6	0	31	7	27	222spec10	0	0	0	0	0	0

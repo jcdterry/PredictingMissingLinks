@@ -1,0 +1,1334 @@
+---
+title: "Combined analysis"
+author: "Chris Terry"
+output: 
+  html_document: 
+    toc: yes
+---
+
+
+```{r message=FALSE, warning=FALSE}
+library(vegan)
+library(bipartite)
+library(bipartiteD3)
+library(tidyverse)
+library(plotly)
+library(readxl)
+library(cowplot)
+library(parallel)
+library(pbapply)
+library(knitr)
+library(cassandRa)
+library(lme4)
+
+
+select<- dplyr::select
+```
+
+Full code to replicate analysis and produce figures. 
+
+
+# Empirical Data
+
+### Functions for Empirical Analysis
+
+```{r}
+
+
+
+CleanWOL_Data_to_List <- function(File){
+  
+  TODROP<-c('Number of droppings analysed\"', 'Frequency of occurrences\"',
+            "Numbers of flowers","Abundance\"", "Number of flowers",
+            "Abundance", "Num. of hosts sampled")
+  
+  read_csv(paste0('Data/WOL/',File ))%>%
+    select(-one_of(TODROP))->x
+  if(as.character(x[1,1]) %in% TODROP){ x<- x[-1,]}
+  
+  as.data.frame(x)%>%
+    column_to_rownames(.,colnames(.)[1])%>%
+    empty->x
+  
+  if(nrow(x)*ncol(x)<30){return(NULL)}
+  if(sum(x>0) <40){return(NULL)}
+  
+  return( list('DF' = as.data.frame(x),
+               'Name'= File,
+               'DataType'= str_sub(File, 1,4)))
+}
+
+CleanDung_Data_to_List <- function(File){
+  
+  read_delim(paste0('Data/DungBeetles/',File ), 
+             "\t", escape_double = FALSE, trim_ws = TRUE )%>% 
+    as.data.frame()%>%
+    column_to_rownames(.,colnames(.)[1])%>%t->x
+  
+  x<-  bipartite::empty(x)
+  
+  if(nrow(x)*ncol(x)<30){return(NULL)}
+  if(nrow(x)<5 | ncol(x)<5){ return(NULL)}
+  if(sum(x>0) <40){return(NULL)}
+  
+  return( list('DF' = as.data.frame(x),
+               'Name'= File,
+               'DataType' ='Dung' ))
+}
+
+CleanTylk_Data_to_List <- function(File){
+  
+  x <- read.delim(paste0('Data/TylianakisEtAl//',File ),
+                  row.names = NULL )[-1,-2] 
+  rownames(x)<-NULL
+  
+  column_to_rownames(x,'Species')%>%
+    select(-X.1)%>%
+    bipartite::empty() -> x
+
+  return( list('DF' = as.data.frame(x),
+               'Name'= File,
+               'DataType' = 'Para' ))
+}
+
+
+DrawFromEmpData<- function(i=1,EmpData, Frac_obs= 0.8 ){
+  set.seed(i)
+  if(Frac_obs== 'Random'){Frac_obs <- runif(1, 0.2, 1)  }
+  
+  EmpDataMat <- as.matrix( EmpData$DF)
+  n_obs = round(sum(EmpDataMat)*Frac_obs,0)
+  
+  obs<-matrix(rmultinom(1,size= n_obs, prob = EmpDataMat),
+              ncol = ncol(EmpDataMat),
+              nrow = nrow(EmpDataMat) )
+  
+  
+  colnames(obs)<- colnames(EmpDataMat)
+  rownames(obs)<- rownames(EmpDataMat)
+  
+  IsComplete<-TRUE 
+  if(any(rowSums(obs)==0) | any(colSums(obs)==0)  ){
+    warning('In this random draw, some species had no records and needed reducing')
+    IsComplete<-FALSE}
+  
+  HostsToKeep<- rowSums(obs)>0
+  WaspsToKeep <- colSums(obs)>0
+  EmpDataMat<- EmpDataMat[HostsToKeep,WaspsToKeep ]
+  obs<- obs[HostsToKeep,WaspsToKeep]
+  
+  if( sum(obs>0) >  0.95*sum(EmpDataMat>0) ){
+    stop(paste('Sample contains over 95% of true web:', EmpData$Name)) # Quit early if too well sampled
+  }
+  
+  
+  out<- list('n_obs' = n_obs,
+             'Frac_obs' = Frac_obs,
+             'i'= i,
+             'DataName'=EmpData$Name,
+             'DataType' = EmpData$DataType,
+             'HostNames'= rownames(EmpDataMat),
+             'WaspNames' = colnames(EmpDataMat),
+             'n_EmpObs'= sum(EmpDataMat),
+             'n_hosts' = nrow(EmpDataMat),
+             'n_wasps' = ncol(EmpDataMat),
+             'actual_conn' = sum(EmpDataMat>0),
+             'obs' = obs ,
+             'IsComplete'=IsComplete,
+             'TrueWeb'= EmpDataMat)
+  return(out)
+}
+
+
+
+DrawThenDo <-function(x, EmpDataList, P){
+  DrawFromEmpData(i=P[x,1],EmpData=EmpDataList[[P[x,2]]], Frac_obs = 'Random')%>%
+    FitAllModels %>%
+    TestAllModels -> xxx
+  return(xxx)
+}
+
+```
+
+
+```{r warning=FALSE}
+
+options(readr.num_columns = 0)
+map(list.files('Data/WOL/'), CleanWOL_Data_to_List)-> WOLListData
+map(list.files('Data/DungBeetles/'), CleanDung_Data_to_List)-> DungListData
+map(list.files('Data/TylianakisEtAl/'), CleanTylk_Data_to_List)-> TylkListData
+
+ListData <- compact(c(WOLListData, DungListData, TylkListData))
+
+ListData %>% map_chr('DataType') %>% table %>% kable
+
+DungListData %>% compact()%>% 
+  map_df(function(list){
+    list$DF-> x
+    data.frame(n=nrow(x), m=ncol(x),c= mean(x>0))
+    })
+
+
+```
+
+
+
+
+```{r eval=FALSE}
+options(readr.num_columns = 0)
+
+P<-expand.grid(1:20,1:length(ListData))
+
+
+cl<- makeCluster(4)
+clusterExport(cl, ls())
+clusterEvalQ(cl,{library(tidyverse);library( bipartite)
+  library(vegan); library(reshape2)
+  library(pROC);library(boot);library(EcoLinkPredict)})
+
+OutputRand <- pblapply(cl = cl,X = 1:nrow(P), safely(DrawThenDo),EmpDataList = ListData, P=P )
+stopCluster(cl)
+
+save(OutputRand,  file= 'Outputs/EmpOutputRand')
+
+(transpose(OutputRand)$result)  %>% compact() %>% flatten-> CleanOutputRand
+
+save(CleanOutputRand, file='Outputs/CleanOutputRand') 
+EmpData<- c(CleanOutputRand, cleanRedo)
+save(EmpData, file='Outputs/EmpData')
+```
+
+
+
+```{r eval=FALSE}
+load( 'Outputs/EmpData')
+Emp_AUC_df<-map_df(EmpData, function(list){
+  list$AUC%>%
+    spread(Basis, AUC)%>%
+    mutate(seed                 = list$i,
+           NetworkType          = list$DataType,
+           NetworkName          = list$DataName,
+           PostSample_n_hosts   = list$n_hosts,
+           PostSample_n_wasps   = list$n_wasps,
+           SampleObs            = list$n_obs,
+           Frac_obs             = list$Frac_obs,
+           TrueConn             = list$actual_conn / PostSample_n_hosts*PostSample_n_wasps,
+           SampleConn           = mean(list$obs>0),
+           FracNetworkComplete  = sum(list$obs>0) / list$actual_conn  ,
+           TrueNetCdef          = 1- (sum(list$TrueWeb[list$obs>0])/sum(list$TrueWeb)), 
+           PotentialNetWorkSize = PostSample_n_hosts*PostSample_n_wasps,
+           NumberSpecies = PostSample_n_hosts+PostSample_n_wasps,
+           OrignalSampleSize    =  list$n_EmpObs)}) 
+
+Emp_NetworkStats<-map_df( EmpData, function(list){
+  x<-bipartite::networklevel(list$TrueWeb,
+                             index = c('weighted nestedness', 'H2','Shannon diversity',
+                                       'cluster coefficient' ,  'number of compartments'))
+  x<- as.data.frame(t(x))
+  x$seed <- list$i
+  return(x)})
+
+Emp_AllStats <- bind_cols(Emp_AUC_df, Emp_NetworkStats)
+save(Emp_AllStats, file='Outputs/Emp_AllStats')
+
+```
+
+
+
+
+### Empirical Data Processing
+
+```{r}
+load( 'Outputs/EmpData')
+load('Outputs/Emp_AllStats')
+
+Emp_AllStats$NetworkType <- factor(Emp_AllStats$NetworkType,
+                                   levels =c( "A_HP", "M_PA", "M_PL" ,
+                                              "M_SD" ,"Dung" ,"Para"), 
+                                   labels = c('Mammal-Parasite\n(n:23)', 
+                                              'Plant-Ant\n(n:2)',
+                                              'Plant-Pollinator\n(n:48)',
+                                              'Plant-Seed Disperser\n(n:10)',
+                                              'Mammal - Dung Beetle\n(n:25)',
+                                              'Host-Parasitoid\n(n:5)'))
+
+Emp_AllStats %>% 
+  gather('PredictiveModel', 'AUC', B:`SBM+H_obs`) ->
+  Emp_AllStats_Long
+
+Emp_AllStats %>% count(NetworkType)
+
+Emp_AllStats%>% ggplot(aes(x=NetworkType, y=SampleObs))+geom_boxplot()+scale_y_log10()
+
+Emp_AllStats_Long %>%
+  select(AUC, PredictiveModel)%>%
+  group_by(PredictiveModel)%>%
+  summarise(MeanAUC = mean(AUC))%>%
+  mutate(column = ifelse(str_detect(PredictiveModel,
+                                    fixed('*C_def')),'*C_def' ,
+                         ifelse(str_detect(PredictiveModel,
+                                           fixed('+C_def')),'+C_def' ,
+                                ifelse(str_detect(PredictiveModel, 
+                                                  fixed('*H_obs')),'*H_obs' ,
+                                       ifelse(str_detect(PredictiveModel,
+                                                         fixed('+H_obs')),'+H_obs',
+                                              'Vanilla'))))) %>%
+  mutate(Base = ifelse(column == 'Vanilla',PredictiveModel, str_sub(PredictiveModel, 1, -7) ))%>%
+  select(- PredictiveModel)%>%
+  spread(key = column, value = MeanAUC)%>%
+  knitr::kable(digits = 3)
+
+Emp_AllStats_Long %>%
+  select(NetworkType,NetworkName, AUC, PredictiveModel)%>%
+  filter(PredictiveModel %in% c('C_def','H_obs', 'SBM', 'C', 'M' , 'B'))-> data_for_MM
+
+
+
+
+MM<-lmer(AUC ~ PredictiveModel * NetworkType +  (1|NetworkName),data = data_for_MM)
+MM2<-lmer(AUC ~ PredictiveModel + NetworkType +  (1|NetworkName),data = data_for_MM)
+MM3<-lm(AUC ~ PredictiveModel + NetworkType ,data = data_for_MM)
+
+summary(MM2)
+
+anova(MM, MM2)
+anova(MM, MM3)
+anova(MM2, MM3)
+
+
+Emp_AllStats_Long %>%
+  select(NetworkType,NetworkName, AUC, PredictiveModel)%>%
+  filter(PredictiveModel %in% c(c('C_def','H_obs', 'SBM', 'C', 'M' , 'B', 'SBM*B', 'SBM+B'),
+                                paste0(c('C_def','H_obs', 'SBM', 'C', 'M' , 'B', 'SBM*B', 'SBM+B'), '*C_def'),
+                                paste0(c('C_def','H_obs', 'SBM', 'C', 'M' , 'B', 'SBM*B', 'SBM+B'), '+C_def')))-> EmpDataForTTest
+
+empTT<-pairwise.t.test(x = EmpDataForTTest$AUC,
+                g = EmpDataForTTest$PredictiveModel, paired = TRUE ) 
+
+ EmpDataForTTest%>%
+   group_by(PredictiveModel)%>%
+   summarise(mean(AUC))%>%
+   arrange(`mean(AUC)`)%>%
+   filter(PredictiveModel !='B')-> orderTT
+
+ empTT$p.value[orderTT$PredictiveModel,]
+ 
+ rownames(empTT$p.value)
+ 
+```
+
+## What is sample coverage of original Empirical Networks
+
+```{r warning=FALSE}
+
+EmpNetCompleteness<-map_df(ListData, function(list){
+  obs<- matrix( unlist(round(list$DF , digits = 0)), ncol=1)
+  
+  CHAO<-  as.data.frame(t(estimateR(t(obs))))
+  
+  data.frame(Name = list$Name, 
+             DataType = list$DataType,
+             CoverageDef = CoverageEstimator(obs  ),
+             EstimatedFracObsInts =CHAO$S.obs  /CHAO$S.chao1, 
+             SingletonClean = all(obs !=1))
+})
+
+
+EmpNetCompleteness %>%
+  filter(!SingletonClean)%>%
+  group_by(DataType)%>%
+  summarise(`Mean Coverage Deficit` = mean(CoverageDef),
+            `Mean Estimated Fraction Interactions Observed` = mean(EstimatedFracObsInts))%>%
+  kable(digits=3)
+
+
+
+EmpNetCompleteness %>%
+  filter(!SingletonClean)%>%
+  count(DataType)
+
+EmpNetCompleteness$DataType<- factor(EmpNetCompleteness$DataType,
+                                   levels =c( "A_HP", "M_PA", "M_PL" ,
+                                              "M_SD" ,"Dung" ,"Para"), 
+                                   labels = c('Mammal-Parasite\n(n:5)', 
+                                              'Plant-Ant\n(n:2)',
+                                              'Plant-Pollinator\n(n:47)',
+                                              'Plant-Seed Disperser\n(n:10)',
+                                              'Mammal - Dung Beetle\n(n:25)',
+                                              'Host-Parasitoid\n(n:5)'))
+
+EmpNetCompleteness %>%
+  filter(!SingletonClean)%>%
+  rename(`Coverage Deficit` = CoverageDef,
+         `Estimated Fraction\nInteractions Observed` = EstimatedFracObsInts)%>%
+  gather('Value','Estimate', 3, 4 )%>%
+  ggplot(aes(y= Estimate, x=DataType))+
+  geom_boxplot()+
+  facet_wrap(~Value)+
+  theme(axis.text.x = element_text(angle=90),
+        axis.title.x=element_blank())
+
+ggsave('Images/FigureS2_1.pdf', width = 10, height = 5)
+ggsave('Images/FigureS2_1.png', width = 10, height = 5, dpi=300)
+
+```
+
+
+
+```{r fig.height=8, fig.width=8}
+Colours <- c('Matching-Centrality'= "#E69F00" ,
+             'Degree' =   "#F0E442", 
+             'Coverage Deficit' =  "#56B4E9"  , 
+             'Sample Size' =  "#0072B2" ,
+             'Latent-Trait'= "#D55E00" ,
+             'Stochastic Block Model' = "#7d44aa" )
+
+
+
+
+
+Mod_Codes <- c('C_def','H_obs', 'SBM', 'C', 'M' , 'B')
+Mod_Names <- c('Coverage Deficit','Sample Size','Stochastic Block Model',
+               'Degree',  'Latent-Trait', 'Matching-Centrality'  )
+
+Emp_AllStats_Long%>%
+  filter(PredictiveModel %in% Mod_Codes)-> tmpEmp
+
+tmpEmp$PredictiveModel <- factor(tmpEmp$PredictiveModel,
+                                 levels = Mod_Codes,
+                                 labels= Mod_Names)
+tmpEmp%>%
+  count(NetworkType)
+
+
+ggplot(tmpEmp, aes(y= AUC,
+                   x= PredictiveModel,
+                   fill= PredictiveModel))+
+  geom_boxplot()+ 
+  theme(axis.text.x = element_blank()) +
+  scale_fill_manual(values = Colours, name='Predictive Model:')+
+  facet_wrap(~NetworkType)+
+  guides(x=FALSE,
+         fill = guide_legend(nrow = 1, byrow=TRUE))+
+  theme(axis.title.x = element_blank(),
+        legend.position = 'bottom', legend.text = element_text(size = 10))  + 
+  geom_hline(yintercept = 0.5, linetype = 'dashed')-> EmpiricalBoxplot
+
+EmpiricalBoxplot
+
+Emp_AllStats_Long%>%
+  filter(PredictiveModel %in%Mod_Codes)%>%
+  aov(data=., AUC~PredictiveModel)%>%
+  TukeyHSD() %>% 
+  broom::tidy()%>%
+  knitr::kable(digits = 4)
+
+```
+
+## How does the underlying network affect the performance of each model:
+
+
+```{r fig.height=8, fig.width=8}
+tmpEmp%>%
+  filter(TrueNetCdef >0.02, TrueNetCdef<0.2)%>%
+  mutate(LogMatrixSize = log10(PotentialNetWorkSize),
+         LogTrueConn = log10(TrueConn),
+         LogTotSpec = log10(NumberSpecies)) %>%
+  rename(`True Connectance (log10)` =  LogTrueConn,
+         `Weighted Nestedness` = `weighted nestedness`, 
+         `Cluster Coefficient` = `cluster coefficient`,
+         `Network Specialisation, H2` = H2, 
+         `Interaction Strength\nShannon diversity` = `Shannon diversity`,
+         `Species count (log10)` = LogTotSpec)%>%
+  gather('Network Property', 'Value', 
+         `Interaction Strength\nShannon diversity`,`True Connectance (log10)`,
+         `Weighted Nestedness`, 
+         `Cluster Coefficient`,`Network Specialisation, H2`,
+         `Species count (log10)`)%>%
+  ggplot(data = .)+
+  geom_smooth(aes(x=Value, y= AUC,col= PredictiveModel),se= FALSE)+
+  scale_colour_manual(values = Colours, name = 'Predictive Model')+
+  facet_wrap(~`Network Property`, scales = 'free_x')+
+  theme(axis.title.x = element_blank()) +
+  geom_density(aes(Value,  y=(..scaled../10)+0.25 ))+
+  coord_cartesian(ylim  = c(0.25, 1), expand = FALSE)
+
+ggsave('Images/FigureS3_1.pdf', width = 12, height = 8)
+ggsave('Images/FigureS3_1.png', width = 12, height = 8, dpi=300)
+
+```
+
+```{r}
+
+
+tmpEmp%>%
+  rename( `Sample Size` = SampleObs) %>%
+  ggplot(data = .)+
+  geom_smooth(aes(x= `Sample Size`, y= AUC,col= PredictiveModel),se= FALSE, method = 'lm')+
+  geom_rug(aes(x=`Sample Size`, y= AUC),sides = 'b')+
+  scale_colour_manual(values = Colours)+
+  scale_x_log10()+facet_wrap(~NetworkType, scales = 'free_x')
+
+
+tmpEmp%>%
+  ggplot(data = .)+
+  geom_smooth(aes(x= Frac_obs, y= AUC,col= PredictiveModel),se= FALSE, method = 'lm')+
+  scale_colour_manual(values = Colours)+facet_wrap(~NetworkType, scales = 'free_x')
+
+```
+
+
+# Artificial Data
+
+### Generating data
+
+```{r}
+n_reps = 2000
+set.seed(1)
+Params<-data.frame('seed'= 1: n_reps, 
+                   'specpar' = rep(c(0.5,1,2,5,10, 50), length= n_reps),
+                   'TargetTrueConn' = runif(n_reps, 0.2, 0.5),
+                   'SampleObs' = floor(runif(n_reps, 300, 2001 )),
+                   'abun_sdlog' = runif(n_reps, 0.5, 3),
+                   'n_hosts' = floor(runif(n_reps, 15, 31)),
+                   'n_wasps' = floor(runif(n_reps, 15, 31)),
+                   'traitvsnested' = runif(n_reps, 0.1, 0.7))
+```
+
+```{r eval=FALSE}
+RunOverParams <- function(i, Params){
+  ExP<-Params[i,]
+  LIST<-make_true_and_sample_web(seed = ExP$seed,
+                                 specpar = ExP$specpar,
+                                 n_hosts = ExP$n_hosts,
+                                 n_wasps = ExP$n_wasps,
+                                 TargetTrueConn = ExP$TargetTrueConn,
+                                 SampleObs = ExP$SampleObs,
+                                 abun_mean = 5,
+                                 abun_sdlog = ExP$abun_sdlog,
+                                 traitvsnested = ExP$traitvsnested)
+  LIST<- FitAllModels(LIST)
+  LIST<- TestAllModels(LIST)
+  return(LIST)
+}
+
+SafeRun<-safely(RunOverParams)
+
+cl<- makeCluster(3)
+clusterExport(cl, ls())
+clusterEvalQ(cl,
+             {library(tidyverse); library( bipartite);
+               library(vegan);library(reshape2);
+               library(pROC);library(boot); library(EcoLinkPredict)})
+zz<- pblapply(cl = cl, X = 1:n_reps,
+              FUN = SafeRun, Params)
+stopCluster(cl)
+
+
+zz %>% map('error') %>% map_lgl(is.null)-> NoError 
+mean(NoError)
+Params$NoError<- NoError
+zz %>% map('error') %>% compact() %>% unique
+
+##  Only one type of error - causesd when no missing species
+
+(transpose(zz)$result) %>%compact()-> result
+#rm(zz) # as v. large
+
+save(result, file = 'Outputs/Artificial_result')
+```
+
+## Secondary Data Processing
+
+```{r}
+load('Outputs/Artificial_result')
+
+##### Add Model Stats
+AUC_df<-map_df(result, function(list){
+  list$AUC%>%
+    spread(Basis, AUC)%>%
+    mutate(seed                 = list$Seed,
+           PostSample_n_hosts   = list$n_hosts,
+           PostSample_n_wasps   = list$n_wasps,
+           TrueConn             = list$TrueConn,
+           SampleConn           = list$SampleConn,
+           FracNetworkComplete  = list$FracNetworkComplete,
+           TrueNetCdef          = list$TrueNetCdef,
+           PotentialNetWorkSize = PostSample_n_hosts*PostSample_n_wasps,
+           NumberSpecies = PostSample_n_hosts+PostSample_n_wasps)}) 
+
+
+#### Add Network Stats
+NetworkStats<-map_df( result, function(list){
+  x<-networklevel(list$TrueWeb,
+                  index = c('weighted nestedness',  'H2','Shannon diversity',
+                            'cluster coefficient' ,'number of compartments'))
+  x<- as.data.frame(t(x))
+  x$seed <- list$Seed
+  return(x)
+})
+
+
+inner_join(Params, AUC_df, by='seed')%>%
+  inner_join(NetworkStats, by='seed')%>%
+  mutate(SamplePerHost = SampleObs / PostSample_n_hosts)-> WideResults
+
+save(WideResults, file='Outputs/WideResults')
+
+WideResults%>%
+  gather('PredictiveModel', 'AUC', `B`: `SBM+H_obs`)  %>%
+  tbl_df-> NicheModelResults
+
+save(NicheModelResults, file='Outputs/NicheModelResults2000')
+```
+
+
+```{r}
+load('Outputs/WideResults')
+load('Outputs/Artificial_result')
+load('Outputs/NicheModelResults2000')
+
+NicheModelResults$FracNetworkComplete %>% mean
+NicheModelResults$TrueNetCdef %>% mean
+```
+
+
+## What is the underlying patterns of the networks?
+
+```{r}
+corrplot::corrplot(cor(select(.data = WideResults, 
+                                  `Target Connectance`=TargetTrueConn,
+                              `Observation Samples` =SampleObs,
+                              `Specialisation Parameter`=specpar,
+                              `Abundance SD Parameter` =abun_sdlog,
+                              `Tau Parameter`= traitvsnested,
+                             `Interaction Shannon Diversity`= `Shannon diversity`,
+                             `True Connectance`= TrueConn,
+                              `Fraction Observed Interactions`= FracNetworkComplete,
+                              `True Coverage Deficit`=TrueNetCdef,
+                              `Weighted Nestedness`=`weighted nestedness`,
+                              `Cluster Coefficent`= `cluster coefficient`,
+                              `Specialisation H2`=H2,
+                              `Samples Per Host`=SamplePerHost)),
+                   method = 'ellipse',type = 'lower')
+png('Images/FigureS1_1.png', width = 8, height = 10, res = 600, units = 'in')
+corrplot::corrplot(cor(select(.data = WideResults, 
+                              `Target\nConnectance`=TargetTrueConn,
+                              `Observation\nSamples` =SampleObs,
+                              `Specialisation\nParameter`=specpar,
+                              `Abundance SD\nParameter` =abun_sdlog,
+                              `Tau Parameter`= traitvsnested,
+                             `Interaction\nShannon Diversity`= `Shannon diversity`,
+                             `True Connectance`= TrueConn,
+                              `Fraction Observed\nInteractions`= FracNetworkComplete,
+                              `True Coverage\nDeficit`=TrueNetCdef,
+                              `Weighted\nNestedness`=`weighted nestedness`,
+                              `Cluster\nCoefficent`= `cluster coefficient`,
+                              `Specialisation H2`=H2,
+                              `Samples Per Host`=SamplePerHost)),
+                   method = 'ellipse',type = 'lower', diag = FALSE, tl.col = 1)
+dev.off()
+
+```
+
+
+## How do the different models compare in terms of overall AUC out:
+
+Overall the models preform relatively similarly
+
+```{r}
+NicheModelResults%>%
+  filter(PredictiveModel %in% Mod_Codes)-> tmpNM
+
+tmpNM$PredictiveModel <- factor(tmpNM$PredictiveModel,
+                                levels = Mod_Codes,
+                                labels= Mod_Names)
+
+ggplot(tmpNM, aes(y= AUC, x= PredictiveModel,
+                  fill= PredictiveModel))+
+  geom_boxplot()+ 
+  theme(axis.text.x = element_blank()) + 
+  theme(axis.title.x = element_blank()) + 
+  scale_fill_manual(values = Colours) + guides(fill=FALSE)+
+  geom_hline(yintercept = 0.5, linetype = 'dashed') -> ArtificialBoxplot
+
+Fig2Legend <- get_legend(EmpiricalBoxplot)
+
+Fig2Top<-plot_grid(ArtificialBoxplot,EmpiricalBoxplot+guides(fill=FALSE), rel_widths = c(1,2),
+          labels = c('a) Artificial Dataset', 'b) Empirical Dataset'), scale = 0.9)
+plot_grid(Fig2Top, Fig2Legend,
+         ncol = 1, rel_heights = c(1, 0.1) )-> Fig2
+Fig2
+
+
+
+ggsave('Images/Figure2.png',plot = Fig2, width = 15, height=8, dpi = 300)
+ggsave('Images/Figure2.pdf',plot = Fig2, width = 15, height=8)
+
+
+NicheModelResults%>%
+  filter(PredictiveModel %in% Mod_Codes)%>%
+  aov(data=., AUC~PredictiveModel)%>% TukeyHSD() %>% 
+  broom::tidy()%>%
+  knitr::kable(digits = 3)
+
+
+
+NicheModelResults%>%
+  filter(PredictiveModel %in% Mod_Codes) -> tdata
+
+pairwise.t.test(x = tdata$AUC, g = tdata$PredictiveModel, paired = TRUE) 
+
+t.test(WideResults$C,  WideResults$B, paired=TRUE)
+
+NicheModelResults %>%
+  select(AUC, PredictiveModel)%>%
+  group_by(PredictiveModel)%>%
+  summarise(MeanAUC = mean(AUC))%>%
+  mutate(column = ifelse(str_detect(PredictiveModel,fixed('*C_def')),
+                         '*C_def' ,
+                         ifelse(str_detect(PredictiveModel, fixed('+C_def')),
+                                '+C_def' ,
+                                ifelse(str_detect(PredictiveModel, fixed('*H_obs')),
+                                       '*H_obs' ,
+                                       ifelse(str_detect(PredictiveModel,fixed('+H_obs')),
+                                              '+H_obs', 'Vanilla'))))) %>%
+  mutate(Base = ifelse(column == 'Vanilla',PredictiveModel, str_sub(PredictiveModel, 1, -7) ))%>%
+  select(- PredictiveModel)%>%
+  spread(key = column, value = MeanAUC)%>%
+  knitr::kable(digits = 3)
+
+
+
+
+
+NicheModelResults %>%
+  filter(PredictiveModel %in% c(c('C_def','H_obs', 'SBM', 'C', 'M' , 'B', 'SBM*B', 'SBM+B'),
+                                paste0(c('C_def','H_obs', 'SBM', 'C', 'M' , 'B', 'SBM*B', 'SBM+B'), '*C_def'),
+                                paste0(c('C_def','H_obs', 'SBM', 'C', 'M' , 'B', 'SBM*B', 'SBM+B'), '+C_def')))-> ArtDataForTTest
+
+ArtTTest<-pairwise.t.test(x = ArtDataForTTest$AUC,
+                g = ArtDataForTTest$PredictiveModel, paired = TRUE ) 
+
+ ArtDataForTTest%>%
+   group_by(PredictiveModel)%>%
+   summarise(mean(AUC))%>%
+   arrange(`mean(AUC)`)%>%
+   filter(PredictiveModel !='B')-> orderTTart
+
+ ArtTTest$p.value[orderTTart$PredictiveModel,]
+ 
+```
+
+## How does the underlying network affect the performance of each model:
+
+
+```{r fig.height=10, fig.width=10, message=FALSE, warning=FALSE}
+
+
+tmpNM%>%
+  filter(H2<0.75)%>%
+  rename(`True Connectance` =  TrueConn,
+         `Weighted Nestedness` = `weighted nestedness`, 
+         `Cluster Coefficient` = `cluster coefficient`,
+         `Network Specialisation, H2` = H2, 
+         `Total Number of Species` = NumberSpecies,
+         `Interaction Shannon Diversity` = `Shannon diversity`)%>%
+  gather('Network Property', 'Value', 
+         `Interaction Shannon Diversity`,`True Connectance`,
+         `Weighted Nestedness`, 
+         `Cluster Coefficient`,`Network Specialisation, H2`,
+         `Total Number of Species`)%>%
+  ggplot(data = .)+
+  geom_smooth(aes(x=Value, y= AUC,col= PredictiveModel), se=FALSE)+
+  scale_colour_manual(values =Colours, name= 'Predictive Model')+
+  facet_wrap(~`Network Property`, scales = 'free_x', strip.position = 'bottom', nrow=2 )+
+  geom_density(aes(Value,  y=(..scaled../10)+0.25 ))+ 
+  theme(strip.text.x = element_text(margin = margin(0.2,0,0.2,0, "cm")),
+        axis.title.x = element_blank(),
+        strip.placement = "outside",
+        strip.background =element_rect(fill="white"),
+        panel.spacing.y = unit(3, units = 'line'))+
+  coord_cartesian(ylim  = c(0.25, 1), expand = FALSE)-> Fig3
+
+
+Fig3+  ggtitle('Performance of Models with Changes to Artificial Network Structure')
+
+ggsave('Images/Figure3.png',Fig3,dpi = 300,  width = 10, height = 6)
+ggsave('Images/Figure3.pdf',Fig3,  width = 10, height = 6)
+
+
+```
+
+## Sampling Quality and Model Capacity
+
+```{r}
+tmpEmp%>%
+  filter(TrueNetCdef >0.02, TrueNetCdef<0.2)%>%
+  mutate(LogMatrixSize = log10(PotentialNetWorkSize),
+         LogTrueConn = log10(TrueConn),
+         LogTotSpec = log10(NumberSpecies),
+         `Samples\nper Host` =SampleObs/PostSample_n_hosts   ) %>%
+  rename(`Network\nCompletion` = FracNetworkComplete,
+         `Overall\nCoverage Deficit` = TrueNetCdef, 
+         `Sample Size\nFraction` = Frac_obs)%>%
+  gather('Network Property', 'Value', 
+         `Network\nCompletion`, `Overall\nCoverage Deficit` ,
+         `Sample Size\nFraction`, `Samples\nper Host` )%>%
+  mutate(Dataset = 'Empirical') %>%
+  ggplot()+
+  geom_smooth(aes(x=Value, y= AUC,col= PredictiveModel),se= FALSE)+
+  scale_colour_manual(values = Colours, name = 'Predictive Model')+
+  facet_grid(Dataset~`Network Property`, scales = 'free_x')+
+  theme(axis.title.x = element_blank(),
+        strip.text = element_text(margin = margin(0.3,0.3,0.3,0.3, "cm"))) +
+  geom_density(aes(Value,  y=(..scaled../10)+0.25 ))+
+  coord_cartesian(ylim  = c(0.25, 1), expand = FALSE)-> EmpSampQual
+
+
+tmpNM%>%
+  rename(`Network\nCompletion` = FracNetworkComplete,
+         `Overall\nCoverage Deficit` = TrueNetCdef, 
+         `Sample Size` = SampleObs, 
+         `Samples\nper Host` = SamplePerHost)%>%
+  filter( `Overall\nCoverage Deficit` >0.02 & `Overall\nCoverage Deficit` <0.1 )%>%
+  gather('Network Property', 'Value', 
+         `Network\nCompletion`, `Overall\nCoverage Deficit` ,
+         `Sample Size` ,`Samples\nper Host`)%>%
+  mutate(Dataset = 'Artificial')%>%
+  ggplot()+
+  geom_smooth(aes(x=Value, y= AUC,col= PredictiveModel),se= FALSE)+
+  scale_colour_manual(values = Colours, name = 'Predictive Model')+
+  facet_grid(Dataset~`Network Property`, scales = 'free_x')+
+  theme(axis.title.x = element_blank(),
+        strip.text = element_text(margin = margin(0.3,0.3,0.3,0.3, "cm"))) +
+  geom_density(aes(Value,  y=(..scaled../10)+0.25 ))+
+  coord_cartesian(ylim  = c(0.25, 1), expand = FALSE)-> ArtSampQual
+
+plot_grid(EmpSampQual,ArtSampQual, ncol = 1, labels = c('a)', 'b)' ), scale = 0.9)
+
+ggsave('Images/FigureS3_2.png', width = 10, height = 6, dpi=300)
+ggsave('Images/FigureS3_2.pdf', width = 10, height = 6)
+
+```
+
+### Relationship between C_def and network completion
+
+```{r}
+lm(data=WideResults, FracNetworkComplete~0 +TrueNetCdef+ offset(rep(1,nrow(WideResults))) )
+
+WideResults%>%
+  ggplot(aes(TrueNetCdef, FracNetworkComplete))+ geom_point()+ geom_abline(intercept=1,slope=-7.6  )
+
+cor(WideResults$FracNetworkComplete, WideResults$TrueNetCdef, method = 'spearman')
+
+```
+
+# How do the predictive models correlate with the strength of the interaction?
+
+## Artificial
+```{r message=FALSE, warning=FALSE}
+ST_PR_Art <- map_df(result, function(list){
+  Missed <-list$obs ==0 & list$TrueWeb>0 
+  ST_PR<-data.frame(TrueStrength = list$TrueWeb[Missed],
+                    'C_defs_missed' = list$C_defmatrix[Missed],
+                    'C_missed'= list$C_ProbsMatrix[Missed],
+                    'M_missed' = list$M_ProbsMatrix[Missed],
+                    'B_missed' = list$B_ProbsMat[Missed],
+                    'SBM_missed' = list$SBM_ProbsMat[Missed],
+                    'H_obs_missed' = rowSums(list$obs)[which(Missed, arr.ind = TRUE)[,1]])
+  
+  CORS <- data.frame('Coverage Deficit'= cor(ST_PR$TrueStrength, ST_PR$C_defs_missed, method = 'spearman'),
+                     'Degree'= cor(ST_PR$TrueStrength, ST_PR$C_missed, method = 'spearman'),
+                     'Latent-Trait'= cor(ST_PR$TrueStrength, ST_PR$M_missed, method = 'spearman'),
+                     'Matching-Centrality'= cor(ST_PR$TrueStrength, ST_PR$B_missed, method = 'spearman'),
+                     'SBM'= cor(ST_PR$TrueStrength, ST_PR$SBM_missed, method = 'spearman'),
+                     'Observation Count' = cor(ST_PR$TrueStrength, ST_PR$H_obs_missed, method = 'spearman'))
+  
+  return(CORS)
+})
+
+ST_PR_Art %>% colMeans(na.rm=TRUE) %>% kable
+
+```
+
+## Empirical
+
+```{r message=FALSE, warning=FALSE}
+ST_PR_emp <- map_df(EmpData, function(list){
+  Missed <-list$obs ==0 & list$TrueWeb>0 
+  ST_PR<-data.frame(TrueStrength = list$TrueWeb[Missed],
+                    'C_defs_missed' = list$C_defmatrix[Missed],
+                    'C_missed'= list$C_ProbsMatrix[Missed],
+                    'M_missed' = list$M_ProbsMatrix[Missed],
+                    'B_missed' = list$B_ProbsMat[Missed],
+                    'SBM_missed' = list$SBM_ProbsMat[Missed],
+                    'H_obs_missed' = rowSums(list$obs)[which(Missed, arr.ind = TRUE)[,1]])
+  
+  CORS <- data.frame('C_defs'= cor(ST_PR$TrueStrength, ST_PR$C_defs_missed, method = 'spearman'),
+                     'C'= cor(ST_PR$TrueStrength, ST_PR$C_missed, method = 'spearman'),
+                     'M'= cor(ST_PR$TrueStrength, ST_PR$M_missed, method = 'spearman'),
+                     'B'= cor(ST_PR$TrueStrength, ST_PR$B_missed, method = 'spearman'),
+                     'SBM'= cor(ST_PR$TrueStrength, ST_PR$SBM_missed, method = 'spearman'),
+                     'H_obs' = cor(ST_PR$TrueStrength, ST_PR$H_obs_missed, method = 'spearman'))
+  
+  return(CORS)
+})
+
+ST_PR_emp %>% colMeans(na.rm=TRUE) %>% kable
+```
+
+
+
+
+NB NA's are caused when all missed interactions have a relative strength of 1, therefore there is no difference in their 
+
+# Estimation of number of missing interactions
+
+```{r}
+load('Outputs/EmpData')
+
+Estimates<- map_df(result,function(list){
+  
+  v <- as.vector(matrix(list$obs, ncol=1))
+  estimates<-data.frame(t(vegan::estimateR(v)))
+  estimates$TrueIntCount = sum(list$TrueWeb>0)
+  estimates$Data = 'Simulated'
+  estimates$ID = list$seed
+  
+  estimates$Shannon = diversity(as.vector(list$TrueWeb))
+  estimates$H2 = H2fun(list$TrueWeb, H2_integer = FALSE)[1]
+  DF<-list$obs
+  x<- unname(DF)
+  n= sum(x)
+  f1 <- sum(x==1)
+  f2 <- sum(x==2)
+  if(f1>0 & f2==0){  c_hat =  (f1/n)} ## Turing-Good
+  if(f1>0 & f2>0){   c_hat = ((f1/n) * ( (f1*(n-1))/((n-1)*(f1+(2*f2))))) }## Chao1
+  if(f1==0){c_hat<-NA}
+  
+  
+  estimates$Cdefest <- c_hat     
+  estimates$CdefTRUE <- 1-(sum(list$TrueWeb[list$obs>0])/sum(list$TrueWeb))     
+  
+  return(estimates)
+})
+
+
+EmpEstimates<- map_df(EmpData,function(list){
+  
+  v <- as.vector(matrix(list$obs, ncol=1))
+  estimates<-data.frame(t(vegan::estimateR(v)))
+  estimates$TrueIntCount = sum(list$TrueWeb>0)
+  estimates$Data = 'Empirical'
+  estimates$ID = list$DataName
+  estimates$Shannon = diversity(as.vector(list$TrueWeb))
+  estimates$H2 = H2fun(list$TrueWeb, H2_integer=FALSE)[1]
+  DF<-list$obs
+  x<- unname(DF)
+  n= sum(x)
+  f1 <- sum(x==1)
+  f2 <- sum(x==2)
+  if(f1>0 & f2==0){  c_hat =  (f1/n)} ## Turing-Good
+  if(f1>0 & f2>0){   c_hat = ((f1/n) * ( (f1*(n-1))/((n-1)*(f1+(2*f2))))) }## Chao1
+  if(f1==0){c_hat<-NA}
+  
+  
+  estimates$Cdefest <- c_hat     
+  estimates$CdefTRUE <- 1-(sum(list$TrueWeb[list$obs>0])/sum(list$TrueWeb))     
+  return(estimates)
+})
+
+### Bias
+bind_rows(Estimates, EmpEstimates) %>% 
+  mutate(CountBias = S.chao1 -TrueIntCount , 
+         CdefBias = Cdefest- CdefTRUE )%>%
+  group_by(Data)%>%
+  summarise(Frac_UnderEst_Int = mean(CountBias<0),
+            Frac_UnderEst_C_Def = mean(CdefBias<0, na.rm=TRUE) )-> ErrTable
+
+ErrTable%>%
+  kable
+
+### Pearson Correlation
+Estimates%>%
+  select(Data, `Interaction Count` =S.chao1, `Coverage Deficit`= Cdefest )%>%
+  gather('Measure' , 'Prediction' , `Interaction Count` , `Coverage Deficit`) -> ArtP
+
+Estimates%>%
+  select(Data, TrueIntCount, CdefTRUE )%>%
+  gather('Measure2' , 'Truth' ,TrueIntCount, CdefTRUE) -> ArtT
+
+EmpEstimates%>%
+  select(Data, `Interaction Count` =S.chao1,`Coverage Deficit`= Cdefest )%>%
+  gather('Measure' , 'Prediction' , `Interaction Count` , `Coverage Deficit`) -> EmpP
+
+EmpEstimates%>%
+  select(Data, TrueIntCount, CdefTRUE )%>%
+  gather('Measure2' , 'Truth' ,TrueIntCount, CdefTRUE) -> EmpT
+
+
+bind_rows(bind_cols(ArtP, ArtT),
+          bind_cols(EmpP, EmpT))-> ALL
+
+dat_text_ints <- data.frame(label = c(paste0("ρ: ",
+                                             signif(cor(Estimates$S.chao1 ,
+                                                        Estimates$TrueIntCount),3) ,
+                                             '\nUnderestimated: ',
+                                             signif(ErrTable$Frac_UnderEst_Int[1],3)),
+                                      paste0("ρ: ",
+                                             signif(cor(EmpEstimates$S.chao1 ,
+                                                        EmpEstimates$TrueIntCount),3),
+                                             '\nUnderestimated: ',
+                                             signif(ErrTable$Frac_UnderEst_Int[2],3))),
+                            Data = c( 'Simulated','Empirical'),
+                            Measure = c('Interaction Count', 'Interaction Count'))
+
+dat_text_Cdef <- data.frame(label = c(paste0("ρ:",
+                                             signif(cor(Estimates$Cdefest ,
+                                                        Estimates$CdefTRUE, use = 'pair'),3) ,
+                                             '\nUnderestimated:',
+                                             signif(ErrTable$Frac_UnderEst_C_Def[1],3)),
+                                      paste0("ρ:",
+                                             signif(cor(EmpEstimates$Cdefest ,
+                                                        EmpEstimates$CdefTRUE, use = 'pair'),3),
+                                             '\nUnderestimated:',
+                                             signif(ErrTable$Frac_UnderEst_C_Def[2],3))),
+                            Data = c( 'Simulated','Empirical'),
+                            Measure = c('Coverage Deficit', 'Coverage Deficit'))
+
+
+
+dat_text_ints <- data.frame(label = c(paste0("r: ",signif(cor(Estimates$S.chao1 , Estimates$TrueIntCount),3)),
+                                      paste0("r: ", signif(cor(EmpEstimates$S.chao1 ,
+                                                        EmpEstimates$TrueIntCount),3))),
+                            Data = c( 'Simulated','Empirical'),
+                            Measure = c('Interaction Count', 'Interaction Count'))
+
+dat_text_Cdef <- data.frame(label = c(paste0("r:", signif(cor(Estimates$Cdefest ,
+                                                        Estimates$CdefTRUE, use = 'pair'),3)),
+                                      paste0("r:", signif(cor(EmpEstimates$Cdefest ,
+                                                        EmpEstimates$CdefTRUE, use = 'pair'),3))),
+                            Data = c( 'Simulated','Empirical'),
+                            Measure = c('Coverage Deficit', 'Coverage Deficit'))
+
+
+ALL$Data <- factor(ALL$Data, levels =  c( 'Simulated','Empirical'))
+
+plot1<-  ALL%>% 
+  filter(Measure =='Interaction Count' )%>%
+  ggplot(aes(x=Prediction, y= Truth))+
+  geom_point(size=0.2)+
+  geom_abline(slope=1, intercept = 0)+
+  facet_wrap(Data~., ncol = 1) + 
+  xlab('Predicted Interaction Count')+
+  ylab('True Interaction Count')+
+  geom_text( data    = dat_text_ints,
+             mapping = aes(x = 500, y =0, label = label),
+             hjust   = 'right', vjust='bottom')+
+  theme(strip.text = element_text(margin = margin(0.3,0.3,0.3,0.3, "cm"), hjust = 0),
+        strip.background = element_rect(fill='white'))
+
+plot2 <- ALL%>% 
+  filter(Measure =='Coverage Deficit' )%>%
+  ggplot(aes(x=Prediction, y= Truth))+
+  geom_point(size=0.2)+
+  geom_abline(slope=1, intercept = 0)+
+  facet_wrap(Data~., ncol = 1 )+ 
+    xlab('Predicted Coverage Deficit')+
+  ylab('True Coverage Deficit')+
+  geom_text( data    = dat_text_Cdef,
+             mapping = aes(x = 0.5, y = 0, label = label),
+             hjust='right', vjust='bottom' )+
+theme(strip.text = element_text(margin = margin(0.3,0.3,0.3,0.3, "cm"), hjust = 0),
+        strip.background = element_rect(fill='white'))
+
+plot_grid(plot1, plot2, labels = c('a)', 'b)'))
+
+ggsave('Images/Figure4.png', width=8, height=7, dpi=300)
+ggsave('Images/Figure4.pdf', width=8, height=7)
+
+```
+
+## Why the difference between the datasets?
+
+No wild divergence in either number of extra observations or Shannon diversity
+
+```{r}
+bind_rows(Estimates, EmpEstimates)%>%
+  mutate(ExtraEst = S.chao1    -S.obs,
+         EstimateErrorInteractions = TrueIntCount -S.chao1)-> DD
+
+# Although overall error increases with sample
+
+ggplot(DD, aes( y=EstimateErrorInteractions, x=H2))+
+  geom_point()+facet_wrap(~Data)+ geom_smooth()
+
+
+ggplot(DD, aes( y=EstimateErrorInteractions, x=Shannon))+
+  geom_point()+facet_wrap(~Data)+ geom_smooth()
+
+ggplot(DD, aes( y=TrueIntCount, x=S.chao1, col=H2))+
+  geom_point()+facet_wrap(~Data)
+
+ggplot(DD, aes( y=EstimateErrorInteractions, x=S.obs))+
+  geom_point(aes(col =ID))+facet_wrap(~Data)+ geom_smooth()+ guides(col=FALSE)
+
+ggplot(DD, aes( y=S.obs, x=Shannon))+
+  geom_point()+facet_wrap(~Data)+ geom_smooth()
+
+```
+
+```{r}
+plot_grid(bind_rows(Estimates, EmpEstimates)%>%
+  mutate(Extra = S.chao1    -S.obs)%>%
+  ggplot(aes( y=Extra, x=Data))+
+  geom_boxplot(),
+
+bind_rows(Estimates, EmpEstimates)%>%
+  ggplot(aes( y=Shannon, x=Data))+
+  geom_boxplot())
+
+```
+
+
+# Abundance - vulnerability relationship
+
+```{r}
+AbundVulnArt<-map_df(result, function(list){
+  Vuln<-rowSums(list$TrueWeb>0)
+  Abun<-rowSums(list$TrueWeb)
+  PerInt<- Abun/Vuln
+  df<- data.frame(Vuln, Abun, PerInt)
+  return(df)
+})
+
+AbundVulnEmp<-map_df(ListData, function(list){
+  Vuln<-rowSums(list$DF>0)
+  Abun<-rowSums(list$DF)
+  df<- data.frame(Vuln, Abun)
+  return(df)
+})
+
+cor( AbundVulnArt$Vuln, AbundVulnArt$Abun, method='spearman')
+cor( AbundVulnEmp$Vuln, AbundVulnEmp$Abun, method='spearman')
+
+
+plot_grid(AbundVulnArt%>%
+  filter(Abun<10000)%>%
+  ggplot(aes(x=Abun, y=Vuln))+
+  geom_point()+ geom_smooth(method='lm'),
+AbundVulnEmp%>%
+  filter(Abun<1000)%>%
+  ggplot(aes(x=Abun, y=Vuln))+
+  geom_point()+
+  geom_smooth(method='lm'), labels = c('Artificial', 'Emprical'))
+
+
+```
+
+
+
+
+# Enhancing Datasets with missing interactions
+
+```{r eval=FALSE}
+EnhanceWeb<- function(list, 
+                      metrics_to_test = c('weighted NODF','niche overlap' ,
+                                          'nestedness' ,'H2', 'connectance')){
+  
+  # How many interactions to add
+  v <- as.vector(matrix(list$obs, ncol=1))
+  estimates<-data.frame(t(vegan::estimateR(v)))
+  N_add <- floor(estimates$S.chao1-estimates$S.obs)
+  
+  # Which to Add
+  list$DataforAUC %>%
+    mutate(RelProb = SBM_Prob +C_def_Prob+Both_Prob,
+           Strength = SBM_Prob+ Both_Prob )%>%
+    arrange(desc(RelProb))%>%
+    slice(1:N_add) -> IntsToAdd
+  
+  ## Option to add by strengths based on prob, butin practice pretty much alsways all more or less one. 
+  ##  IntsToAdd$Strength =  IntsToAdd$Strength /mean( IntsToAdd$Strength )
+  EnhancedWeb <-list$obs
+  for(x in 1: nrow(IntsToAdd)){   EnhancedWeb[IntsToAdd$Host[x], IntsToAdd$Wasp[x] ]<-1 }
+  
+ 
+  df<- data.frame( 'True'= networklevel(list$TrueWeb*10, index = metrics_to_test),
+                   'Enhanced'= networklevel(EnhancedWeb, index = metrics_to_test),
+                   'Observed'=networklevel(list$obs, index =metrics_to_test),
+                   'NetworkID' = list$Seed  )%>%
+    rownames_to_column(var = 'Metric')
+  
+  cat(list$Seed)
+  return(df)
+}
+
+
+BiasCorrect <- map_df(result, EnhanceWeb)
+  
+save(BiasCorrect,file = 'Outputs/BiasCorrect')
+
+
+```
+
+
+```{r}
+
+load('Outputs/BiasCorrect')
+
+
+BiasCorrect$Metric <- factor(x = BiasCorrect$Metric, 
+                             levels =c('connectance','nestedness','H2',
+                                       'niche.overlap.HL','niche.overlap.LL',
+                                       'weighted NODF'),
+                             labels=c( 'Connectance',
+                                       'Nestedness', 
+                                       "Specialisation, H2'" ,
+                                       "Upper Level Niche Overlap",
+                                       "Lower Level Niche Overlap",
+                                       "Weighted Nestedness, NODF"))
+
+## Qualitative Metrics
+QUAL <- c('Connectance', 'Nestedness', 
+          "Upper Level Niche Overlap",
+          "Lower Level Niche Overlap")
+
+
+BiasCorrect%>%
+    filter(Metric %in% QUAL) %>%
+  gather('Network','Predicted Value', Enhanced, Observed )%>%
+  ggplot(aes(x=`Predicted Value`, y= True))+
+  geom_point(aes(col=Network), size=0.01, shape=1)+#scale_color_viridis_d()+ 
+  scale_color_manual(values = c('Enhanced'= 2, 
+                                'Observed'=1), guide=FALSE)+ 
+  facet_wrap(.~Metric,
+            # strip.position = 'bottom',
+             scales = 'free')+
+  theme(strip.text.x = element_text(margin = margin(0.2,0,0.2,0, "cm"), hjust = 0),
+       # strip.placement = "outside",
+        strip.background =element_rect(fill="white"),
+        panel.spacing.y = unit(3, units = 'line'))+
+  geom_abline(slope=1, intercept=0)-> biasplot
+
+BiasCorrect%>% 
+  filter(Metric %in% QUAL) %>%
+  group_by(Metric)%>%
+  filter(!is.na(Enhanced)) %>%
+  summarise(EnhancedCor  = signif( cor(True, Enhanced, use = 'pairwise'), 3),
+            ObservedCor  = signif(cor(True, Observed, use = 'pairwise'), 3),
+            EnhancedBias = signif(mean(True> Enhanced, na.rm=TRUE), 3),
+            ObservedBias = signif(mean(True> Observed, na.rm=TRUE), 3),
+            EnhancedMeanErr =signif(mean(abs(True-Enhanced), na.rm=TRUE), 3),
+            ObservedMeanErr = signif(mean(abs(True-Observed), na.rm=TRUE), 3))%>%
+  mutate(Label1 =paste0('Augmented r: ', EnhancedCor,'\nObserved r: ',ObservedCor,  '\n')) ->Bias_DF
+
+
+QualMetrics<- biasplot+
+  geom_text( data    = Bias_DF,
+           mapping = aes(x = Inf, y =-Inf, label = Label1),
+             hjust   = 1, vjust='bottom', size=3)+
+  xlab('Estimated Metric Value')+
+  ylab('True Value Of Full Network')
+
+## Quantiative
+QUANT <- c(     "Specialisation, H2'" , "Weighted Nestedness, NODF")
+
+BiasCorrect%>%
+    filter(Metric %in% QUANT) %>%
+  gather('Network','Predicted Value', Enhanced, Observed )%>%
+  ggplot(aes(x=`Predicted Value`, y= True))+
+  geom_point(aes(col=Network), size=0.01, shape=1)+#scale_color_viridis_d()+ 
+  scale_color_manual(values = c('Enhanced'= 2, 
+                                'Observed'=1), guide=FALSE)+ 
+  facet_wrap(.~Metric,
+            # strip.position = 'bottom',
+             scales = 'free', ncol=1)+
+  theme(strip.text.x = element_text(margin = margin(0.2,0,0.2,0, "cm"), hjust = 0),
+       # strip.placement = "outside",
+        strip.background =element_rect(fill="white"),
+        panel.spacing.y = unit(3, units = 'line'))+
+  geom_abline(slope=1, intercept=0)-> biasplot
+
+BiasCorrect%>% 
+  filter(Metric %in% QUANT) %>%
+  group_by(Metric)%>%
+  filter(!is.na(Enhanced)) %>%
+  summarise(EnhancedCor  = signif( cor(True, Enhanced, use = 'pairwise'), 3),
+            ObservedCor  = signif(cor(True, Observed, use = 'pairwise'), 3),
+            EnhancedBias = signif(mean(True> Enhanced, na.rm=TRUE), 3),
+            ObservedBias = signif(mean(True> Observed, na.rm=TRUE), 3),
+            EnhancedMeanErr =signif(mean(abs(True-Enhanced), na.rm=TRUE), 3),
+            ObservedMeanErr = signif(mean(abs(True-Observed), na.rm=TRUE), 3))%>%
+  mutate(Label1 =paste0('Augmented r: ', EnhancedCor,'\nObserved r: ',ObservedCor,  '\n')) ->Bias_DF
+
+
+QuantMetrics<- biasplot+
+  geom_text( data    = Bias_DF,
+           mapping = aes(x = Inf, y =-Inf, label = Label1),
+             hjust   = 1, vjust='bottom', size=3)+
+  xlab('Estimated Metric Value')+
+  ylab('')
+
+
+plot_grid(QualMetrics,
+          NULL,
+          QuantMetrics,
+          rel_widths = c(1.8,0.1, 1), labels = c('a)' ,'', 'b)'), nrow=1)
+
+ggsave('Images/Figure5.png', height=6, width=10, dpi=300)
+ggsave('Images/Figure5.pdf', height=6, width=10)
+
+```
+
+
+# What was the balance between the matching and centrality terms
+
+```{r}
+EmpLambdas<-map_dbl(EmpData, function(list){list$B_par['B_lam']})
+hist(log10(EmpLambdas))
+```
+
+
+# Example Plots of Predictive Model Fit
+
+
+```{r fig.height=10, fig.width=10, message=FALSE, warning=FALSE}
+
+demoweb<-make_true_and_sample_web(seed = 4,specpar =  2, n_hosts = 25,n_wasps =  25,
+                                  TargetTrueConn = 0.3, SampleObs = 800, traitvsnested = 0.1)
+demoweb<- FitAllModels(demoweb)
+demoweb<- TestAllModels(demoweb)
+
+THEME <- theme(plot.title = element_text( color = 'black', 
+                              face = 'plain', 
+                              size = 12, 
+                              hjust = 0), 
+               axis.text.y   = element_blank(),
+                           axis.text.x = element_blank())
+
+cowplot::plot_grid(PlotFit(demoweb, 'C', title = 'a) Degree Model')+ THEME,
+                   PlotFit(demoweb, 'M', OrderBy = 'LatentTrait', title = 'b) Latent-Trait Model')+ THEME,
+                   PlotFit(demoweb, 'C_def', addDots = 'Size', RemoveTP = TRUE,
+                           title = 'c) Coverage-Deficit Model', OrderBy = 'Degree', )+ THEME,
+                   PlotFit(demoweb, 'B', title = 'c) Matching-Centrality Model')+ THEME,
+                   PlotFit(demoweb, 'SBM', OrderBy = 'SBM', title = 'e) Stochastic Block Model')+ THEME,
+                   PlotFit(demoweb,c('SBM','C_def'), Combine = '+', OrderBy = 'SBM', 
+                           title = 'f) SBM and Coverage-Deficit Model')+ THEME,
+                   ncol = 3 )
+
+ggsave('Images/Figure1.png', width = 12, height=8, dpi = 300)
+ggsave('Images/Figure1.pdf', width = 12, height=8)
+
+demoweb$AUC %>% arrange(AUC)
+
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+
+

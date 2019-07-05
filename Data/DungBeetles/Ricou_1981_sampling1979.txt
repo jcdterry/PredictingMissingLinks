@@ -1,0 +1,1 @@
+	sheep	cattleAphodius_rufipes	61	251Aphodius_depressus	73	77Aphodius_fimetarius	32	54Aphodius_ater	83	58Aphodius_erraticus	15	16Aphodius_quadrimaculatus	4	1Aphodius_fossor	0	5Aphodius_haemorrhoidalis	3	1Aphodius_prodromus	0	0Onthophagus_ovatus	29	2Onthophagus_joannae	57	18Onthophagus_fracticornis	13	19Onthophagus_similis	49	31

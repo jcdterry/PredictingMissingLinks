@@ -1,0 +1,7 @@
+	cattle	horse
+Planolinus_vittatus	1055	183
+Gonaphodielus_opisthius	257	179
+Cephalocyclus_durangoensis	49	330
+Liothorax_levatus	4	160
+Onthophagus_chevrolati	178	134
+Onthotrupes_viridiobscurus	19	26

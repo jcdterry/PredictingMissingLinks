@@ -1,0 +1,1 @@
+	sheep	cattle	deer	horseAnoplotrupes_stercorosus	126	41	39	2Trypocopris_pyrenaeus	85	35	16	2Geotrupes_stercorarius	16	9	7	0Aphodius_constans	0	0	5	0Onthophagus_fracticornis	1	1	0	0

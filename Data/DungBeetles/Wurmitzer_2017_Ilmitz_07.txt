@@ -1,0 +1,1 @@
+	cattle	donkey	horseonthophagus_ovatus/joannae	1	0	10onthophagus_furcatus	19	39	117onthophagus_nuchicornis	1	12	30onthophagus_ruficapillus	2	1	3onthophagus_taurus&illyricus	2	10	5euoniticellus_fulvus	1	4	1

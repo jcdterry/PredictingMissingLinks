@@ -1,0 +1,1 @@
+	cattle	deer	horse	wildboarOnthophagus_ovatus	350	127	160	50Onthophagus_coenobita	24	210	50	18Aphodius_varians	50	19	200	14Onthophagus_illyricus	120	50	10	80Aphodius_sticticus	90	63	73	14Onthophagus_taurus	130	21	19	50Euoniticellus_fulvus	65	15	19	8Aphodius_depressus	20	61	2	1Aphodius_borealis	1	23	1	6Aphodius_paracoenosus	2	25	1	2

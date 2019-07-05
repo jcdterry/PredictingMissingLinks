@@ -1,0 +1,9 @@
+	rabbit	cattle
+Aphodius_lusitanicus	23	0
+Onthophagus_emarginatus	7	4
+Scarabaeus_sacer	0	2
+Onthophagus_taurus	0	2
+Thorectes_intermedius	0	2
+Onthophagus_merdarius	0	1
+Trox_perlatus_hispanicus	0	1
+Aphodius_ibericus	1	0

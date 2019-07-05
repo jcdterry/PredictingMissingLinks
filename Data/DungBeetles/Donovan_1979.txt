@@ -1,0 +1,1 @@
+	cattle	horse	human	kangaroo	sheepOnthophagus_australis	24919	46400	101486	24610	29045Onthophagus_granulatus	39723	49539	90202	17454	30363Onthophagus_bicarinaticeps	258	535	635	124	307Onthophagus_pexatus	115	91	200	58	106Onthophagus_chepara	3	4	129	5	21Onthophagus_dandalu	23	1	0	1	0

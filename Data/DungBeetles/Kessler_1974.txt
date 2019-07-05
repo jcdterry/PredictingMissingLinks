@@ -1,0 +1,1 @@
+	cattle	sheepOnthophagus_hecate	315	45Onthophagus_pennsylvanicus	43	10Aphodius_haemorrhoidalis	824	47Aphodius_granarius	297	356Aphodius_fimetarius	139	6Aphodius_vittatus	45	13Aphodius_distinctus	18	18Aphodius_ruricola	24	60Aphodius_coloradensis	19	0Aphodius_stercorosus	11	0Aphodius_fossor	10	0Aphodius_prodromus	1	0Copris_tullius	7	0Ataenius_spretulus	103	18
