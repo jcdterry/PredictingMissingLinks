@@ -359,7 +359,7 @@ EmpNetCompleteness$DataType<- factor(EmpNetCompleteness$DataType,
 
 EmpNetCompleteness %>%
   filter(!SingletonClean)%>%
-  rename(`Coverage Deficit` = CoverageDef,
+  rename(`Coverage` = CoverageDef,
          `Estimated Fraction\nInteractions Observed` = EstimatedFracObsInts)%>%
   gather('Value','Estimate', 3, 4 )%>%
   ggplot(aes(y= Estimate, x=DataType))+
@@ -370,6 +370,10 @@ EmpNetCompleteness %>%
 
 ggsave('Images/FigureS2_1.pdf', width = 10, height = 5)
 ggsave('Images/FigureS2_1.png', width = 10, height = 5, dpi=300)
+
+EmpNetCompleteness %>%
+  #group_by(DataType)%>%
+  summarise(mean(EstimatedFracObsInts))
 
 ```
 
