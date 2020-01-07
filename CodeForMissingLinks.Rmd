@@ -23,14 +23,15 @@ library(lme4)
 
 
 select<- dplyr::select
+
+try(setwd("C:/Users/pemb4504/Dropbox/0DrosPostdoc/PredictionOfMissingLinks"))
+try(setwd("C:/Users/Chris/Dropbox/0DrosPostdoc/PredictionOfMissingLinks"))
+
 ```
-
-Full code to replicate analysis and produce figures. 
-
 
 # Empirical Data
 
-### Functions for Empirical Analysis
+#### Functions for Empirical Analysis
 
 ```{r}
 
@@ -85,7 +86,10 @@ CleanTylk_Data_to_List <- function(File){
   column_to_rownames(x,'Species')%>%
     select(-X.1)%>%
     bipartite::empty() -> x
-
+  
+  #if(nrow(x)*ncol(x)<30){return(NULL)}
+  #if(sum(x>0) <40){return(NULL)}
+  
   return( list('DF' = as.data.frame(x),
                'Name'= File,
                'DataType' = 'Para' ))
@@ -195,13 +199,13 @@ save(OutputRand,  file= 'Outputs/EmpOutputRand')
 
 save(CleanOutputRand, file='Outputs/CleanOutputRand') 
 EmpData<- c(CleanOutputRand, cleanRedo)
-save(EmpData, file='Outputs/EmpData')
+save(EmpData, file='Outputs/EmpDataRedo') # Some redone, so now called
 ```
 
 
 
 ```{r eval=FALSE}
-load( 'Outputs/EmpData')
+load( 'EmpDataRedo')
 Emp_AUC_df<-map_df(EmpData, function(list){
   list$AUC%>%
     spread(Basis, AUC)%>%
@@ -239,7 +243,7 @@ save(Emp_AllStats, file='Outputs/Emp_AllStats')
 ### Empirical Data Processing
 
 ```{r}
-load( 'Outputs/EmpData')
+load( 'EmpDataRedo')
 load('Outputs/Emp_AllStats')
 
 Emp_AllStats$NetworkType <- factor(Emp_AllStats$NetworkType,
@@ -359,7 +363,7 @@ EmpNetCompleteness$DataType<- factor(EmpNetCompleteness$DataType,
 
 EmpNetCompleteness %>%
   filter(!SingletonClean)%>%
-  rename(`Coverage` = CoverageDef,
+  rename(`Coverage Deficit` = CoverageDef,
          `Estimated Fraction\nInteractions Observed` = EstimatedFracObsInts)%>%
   gather('Value','Estimate', 3, 4 )%>%
   ggplot(aes(y= Estimate, x=DataType))+
@@ -371,29 +375,25 @@ EmpNetCompleteness %>%
 ggsave('Images/FigureS2_1.pdf', width = 10, height = 5)
 ggsave('Images/FigureS2_1.png', width = 10, height = 5, dpi=300)
 
-EmpNetCompleteness %>%
-  #group_by(DataType)%>%
-  summarise(mean(EstimatedFracObsInts))
-
 ```
 
 
 
 ```{r fig.height=8, fig.width=8}
 Colours <- c('Matching-Centrality'= "#E69F00" ,
-             'Degree' =   "#F0E442", 
+             'Connectance' =   "#F0E442", 
              'Coverage Deficit' =  "#56B4E9"  , 
              'Sample Size' =  "#0072B2" ,
              'Latent-Trait'= "#D55E00" ,
-             'Stochastic Block Model' = "#7d44aa" )
+             'Block' = "#7d44aa" )
 
 
 
 
 
 Mod_Codes <- c('C_def','H_obs', 'SBM', 'C', 'M' , 'B')
-Mod_Names <- c('Coverage Deficit','Sample Size','Stochastic Block Model',
-               'Degree',  'Latent-Trait', 'Matching-Centrality'  )
+Mod_Names <- c('Coverage Deficit','Sample Size','Block',
+               'Connectance',  'Latent-Trait', 'Matching-Centrality'  )
 
 Emp_AllStats_Long%>%
   filter(PredictiveModel %in% Mod_Codes)-> tmpEmp
@@ -411,11 +411,12 @@ ggplot(tmpEmp, aes(y= AUC,
   geom_boxplot()+ 
   theme(axis.text.x = element_blank()) +
   scale_fill_manual(values = Colours, name='Predictive Model:')+
+  #ggtitle('Model Perfomance on Emp Data')+
   facet_wrap(~NetworkType)+
   guides(x=FALSE,
          fill = guide_legend(nrow = 1, byrow=TRUE))+
   theme(axis.title.x = element_blank(),
-        legend.position = 'bottom', legend.text = element_text(size = 10))  + 
+        legend.position = 'bottom', legend.text = element_text(size = 12))  + 
   geom_hline(yintercept = 0.5, linetype = 'dashed')-> EmpiricalBoxplot
 
 EmpiricalBoxplot
@@ -451,7 +452,9 @@ tmpEmp%>%
          `Species count (log10)`)%>%
   ggplot(data = .)+
   geom_smooth(aes(x=Value, y= AUC,col= PredictiveModel),se= FALSE)+
+  # geom_point(aes(x=Value, y= AUC,col= PredictiveModel))+
   scale_colour_manual(values = Colours, name = 'Predictive Model')+
+  #geom_rug(aes(x=Value, y= AUC),sides = 'b')+
   facet_wrap(~`Network Property`, scales = 'free_x')+
   theme(axis.title.x = element_blank()) +
   geom_density(aes(Value,  y=(..scaled../10)+0.25 ))+
@@ -539,13 +542,13 @@ zz %>% map('error') %>% compact() %>% unique
 (transpose(zz)$result) %>%compact()-> result
 #rm(zz) # as v. large
 
-save(result, file = 'Outputs/Artificial_result')
+save(result, file = 'Outputs/Artificial_result_redo')
 ```
 
 ## Secondary Data Processing
 
 ```{r}
-load('Outputs/Artificial_result')
+load('Outputs/Artificial_result_redo')
 
 ##### Add Model Stats
 AUC_df<-map_df(result, function(list){
@@ -583,14 +586,14 @@ WideResults%>%
   gather('PredictiveModel', 'AUC', `B`: `SBM+H_obs`)  %>%
   tbl_df-> NicheModelResults
 
-save(NicheModelResults, file='Outputs/NicheModelResults2000')
+save(NicheModelResults, file='Outputs/NicheModelResults2000redo')
 ```
 
 
 ```{r}
 load('Outputs/WideResults')
-load('Outputs/Artificial_result')
-load('Outputs/NicheModelResults2000')
+load('Outputs/Artificial_result_redo')
+load('Outputs/NicheModelResults2000redo')
 
 NicheModelResults$FracNetworkComplete %>% mean
 NicheModelResults$TrueNetCdef %>% mean
@@ -651,20 +654,29 @@ tmpNM$PredictiveModel <- factor(tmpNM$PredictiveModel,
 ggplot(tmpNM, aes(y= AUC, x= PredictiveModel,
                   fill= PredictiveModel))+
   geom_boxplot()+ 
+  #theme(axis.text.x = element_text(angle=45, hjust = 1)) 
   theme(axis.text.x = element_blank()) + 
   theme(axis.title.x = element_blank()) + 
   scale_fill_manual(values = Colours) + guides(fill=FALSE)+
   geom_hline(yintercept = 0.5, linetype = 'dashed') -> ArtificialBoxplot
 
-Fig2Legend <- get_legend(EmpiricalBoxplot)
 
-Fig2Top<-plot_grid(ArtificialBoxplot,EmpiricalBoxplot+guides(fill=FALSE), rel_widths = c(1,2),
-          labels = c('a) Artificial Dataset', 'b) Empirical Dataset'), scale = 0.9)
+
+
+Fig2Legend <- get_legend(EmpiricalBoxplot+ theme(legend.text = element_text(size = 18),
+                                                 legend.title = element_text(size = 20)))
+
+Fig2Top<-plot_grid(ArtificialBoxplot,
+                   EmpiricalBoxplot+
+                     guides(fill=FALSE)+
+                     theme(strip.background = element_rect(fill = 'grey95')),
+                   rel_widths = c(1,2),
+                   labels = c('a) Artificial Dataset', 'b) Empirical Dataset'), 
+                   scale = 0.9)
+
 plot_grid(Fig2Top, Fig2Legend,
          ncol = 1, rel_heights = c(1, 0.1) )-> Fig2
 Fig2
-
-
 
 ggsave('Images/Figure2.png',plot = Fig2, width = 15, height=8, dpi = 300)
 ggsave('Images/Figure2.pdf',plot = Fig2, width = 15, height=8)
@@ -746,6 +758,7 @@ tmpNM%>%
   ggplot(data = .)+
   geom_smooth(aes(x=Value, y= AUC,col= PredictiveModel), se=FALSE)+
   scale_colour_manual(values =Colours, name= 'Predictive Model')+
+  # geom_rug(aes(x=Value, y= AUC),sides = 'b')+
   facet_wrap(~`Network Property`, scales = 'free_x', strip.position = 'bottom', nrow=2 )+
   geom_density(aes(Value,  y=(..scaled../10)+0.25 ))+ 
   theme(strip.text.x = element_text(margin = margin(0.2,0,0.2,0, "cm")),
@@ -782,7 +795,9 @@ tmpEmp%>%
   mutate(Dataset = 'Empirical') %>%
   ggplot()+
   geom_smooth(aes(x=Value, y= AUC,col= PredictiveModel),se= FALSE)+
+  # geom_point(aes(x=Value, y= AUC,col= PredictiveModel))+
   scale_colour_manual(values = Colours, name = 'Predictive Model')+
+  #geom_rug(aes(x=Value, y= AUC),sides = 'b')+
   facet_grid(Dataset~`Network Property`, scales = 'free_x')+
   theme(axis.title.x = element_blank(),
         strip.text = element_text(margin = margin(0.3,0.3,0.3,0.3, "cm"))) +
@@ -802,7 +817,9 @@ tmpNM%>%
   mutate(Dataset = 'Artificial')%>%
   ggplot()+
   geom_smooth(aes(x=Value, y= AUC,col= PredictiveModel),se= FALSE)+
+  #geom_point(aes(x=Value, y= AUC,col= PredictiveModel), size=0.1)+
   scale_colour_manual(values = Colours, name = 'Predictive Model')+
+  #geom_rug(aes(x=Value, y= AUC),sides = 'b')+
   facet_grid(Dataset~`Network Property`, scales = 'free_x')+
   theme(axis.title.x = element_blank(),
         strip.text = element_text(margin = margin(0.3,0.3,0.3,0.3, "cm"))) +
@@ -828,7 +845,7 @@ cor(WideResults$FracNetworkComplete, WideResults$TrueNetCdef, method = 'spearman
 
 ```
 
-# How do the predictive models correlate with the strength of the interaction?
+# How do the predictive models correlate with the strength of the interaction??
 
 ## Artificial
 ```{r message=FALSE, warning=FALSE}
@@ -843,7 +860,7 @@ ST_PR_Art <- map_df(result, function(list){
                     'H_obs_missed' = rowSums(list$obs)[which(Missed, arr.ind = TRUE)[,1]])
   
   CORS <- data.frame('Coverage Deficit'= cor(ST_PR$TrueStrength, ST_PR$C_defs_missed, method = 'spearman'),
-                     'Degree'= cor(ST_PR$TrueStrength, ST_PR$C_missed, method = 'spearman'),
+                     'Connectance'= cor(ST_PR$TrueStrength, ST_PR$C_missed, method = 'spearman'),
                      'Latent-Trait'= cor(ST_PR$TrueStrength, ST_PR$M_missed, method = 'spearman'),
                      'Matching-Centrality'= cor(ST_PR$TrueStrength, ST_PR$B_missed, method = 'spearman'),
                      'SBM'= cor(ST_PR$TrueStrength, ST_PR$SBM_missed, method = 'spearman'),
@@ -890,7 +907,7 @@ NB NA's are caused when all missed interactions have a relative strength of 1, t
 # Estimation of number of missing interactions
 
 ```{r}
-load('Outputs/EmpData')
+load('Outputs/EmpDataRedo')
 
 Estimates<- map_df(result,function(list){
   
@@ -1049,8 +1066,8 @@ theme(strip.text = element_text(margin = margin(0.3,0.3,0.3,0.3, "cm"), hjust = 
 
 plot_grid(plot1, plot2, labels = c('a)', 'b)'))
 
-ggsave('Images/Figure4.png', width=8, height=7, dpi=300)
-ggsave('Images/Figure4.pdf', width=8, height=7)
+ggsave('Images/FigureS5.png', width=8, height=7, dpi=300)
+ggsave('Images/FigureS5.pdf', width=8, height=7)
 
 ```
 
@@ -1074,6 +1091,8 @@ ggplot(DD, aes( y=EstimateErrorInteractions, x=Shannon))+
 
 ggplot(DD, aes( y=TrueIntCount, x=S.chao1, col=H2))+
   geom_point()+facet_wrap(~Data)
+
+
 
 ggplot(DD, aes( y=EstimateErrorInteractions, x=S.obs))+
   geom_point(aes(col =ID))+facet_wrap(~Data)+ geom_smooth()+ guides(col=FALSE)
@@ -1281,8 +1300,27 @@ plot_grid(QualMetrics,
           QuantMetrics,
           rel_widths = c(1.8,0.1, 1), labels = c('a)' ,'', 'b)'), nrow=1)
 
-ggsave('Images/Figure5.png', height=6, width=10, dpi=300)
-ggsave('Images/Figure5.pdf', height=6, width=10)
+
+
+
+ggsave('Images/Figure4.png', height=6, width=10, dpi=300)
+ggsave('Images/Figure4.pdf', height=6, width=10)
+
+
+
+
+# 
+# 
+#   mutate(Label1 =paste0('Enhanced \nCorr:', str_pad(EnhancedCor,8, side = 'both'),'\n', 
+#                        'Bias:', str_pad(EnhancedBias,8, side = 'both'), '\n',
+#                        'Mean Error:', str_pad(EnhancedMeanErr,8, side = 'both'),'\n'),
+#          Label2 = paste0('Observed\n',
+#                          str_pad(ObservedCor,8, side = 'both'),'\n',
+#                          str_pad(ObservedBias,8, side = 'both'),'\n',
+#                          str_pad( ObservedMeanErr,8, side = 'both'),'\n' ))
+
+
+
 
 ```
 
@@ -1312,27 +1350,71 @@ THEME <- theme(plot.title = element_text( color = 'black',
                axis.text.y   = element_blank(),
                            axis.text.x = element_blank())
 
-cowplot::plot_grid(PlotFit(demoweb, 'C', title = 'a) Degree Model')+ THEME,
+cowplot::plot_grid(PlotFit(demoweb, 'C', title = 'a) Connectance Model')+ THEME,
                    PlotFit(demoweb, 'M', OrderBy = 'LatentTrait', title = 'b) Latent-Trait Model')+ THEME,
                    PlotFit(demoweb, 'C_def', addDots = 'Size', RemoveTP = TRUE,
                            title = 'c) Coverage-Deficit Model', OrderBy = 'Degree', )+ THEME,
                    PlotFit(demoweb, 'B', title = 'c) Matching-Centrality Model')+ THEME,
-                   PlotFit(demoweb, 'SBM', OrderBy = 'SBM', title = 'e) Stochastic Block Model')+ THEME,
+                   PlotFit(demoweb, 'SBM', OrderBy = 'SBM', title = 'e) Block')+ THEME,
                    PlotFit(demoweb,c('SBM','C_def'), Combine = '+', OrderBy = 'SBM', 
-                           title = 'f) SBM and Coverage-Deficit Model')+ THEME,
+                           title = 'f) Block and Coverage-Deficit Model')+ THEME,
                    ncol = 3 )
 
 ggsave('Images/Figure1.png', width = 12, height=8, dpi = 300)
 ggsave('Images/Figure1.pdf', width = 12, height=8)
 
+
+# cowplot::plot_grid(PlotFit(demoweb, 'C', title = 'a) Connectance Model')+ THEME,
+#                    PlotFit(demoweb, 'M',title = 'b) Latent-Trait Model')+THEME,
+#                    PlotFit(demoweb, 'C_def', addDots = 'Size',
+#                            title = 'c) Coverage-Deficit Model', RemoveTP = TRUE)+THEME,
+#                    PlotFit(demoweb, 'SBM',  title = 'd) Stochastic Block Model')+THEME,
+#                    PlotFit(demoweb, 'B', title = 'e) Matching-Centrality Model')+THEME,
+#                    PlotFit(demoweb,c('SBM','C_def'), Combine = '+', OrderBy = 'Degree',
+#                            title = 'f) SBM and Coverage-Deficit Model')+THEME,
+#                    ncol = 3 )
+# 
+# ggsave('Images/ExamplePlot2.png', width = 12, height=8, dpi = 300)
+# ggsave('Images/ExamplePlot2.pdf', width = 12, height=8)
+
 demoweb$AUC %>% arrange(AUC)
 
 ```
 
-# Session Info
 
-```{r}
-sessionInfo()
+# Example Plots of Predictive Model Fit (v2)
+
+
+```{r fig.height=10, fig.width=10, message=FALSE, warning=FALSE}
+
+THEME <- theme(plot.title = element_text( color = 'black', 
+                              face = 'plain', 
+                              size = 12, 
+                              hjust = 0), 
+               axis.text.y   = element_blank(),
+                           axis.text.x = element_blank())
+
+cowplot::plot_grid(PlotFit(demoweb, 'C', OrderBy = 'Degree',
+                           title = 'a) Connectance Model', RemoveTP = TRUE)+ THEME,
+                   PlotFit(demoweb, 'M', OrderBy = 'Degree',
+                           title = 'b) Latent-Trait Model', RemoveTP = TRUE)+ THEME,
+                   PlotFit(demoweb, 'C_def', OrderBy = 'Degree', RemoveTP = TRUE,
+                           title = 'c) Coverage-Deficit Model')+ THEME,
+                   PlotFit(demoweb, 'B', OrderBy = 'Degree',
+                           title = 'd) Matching-Centrality Model', RemoveTP = TRUE)+ THEME,
+                   PlotFit(demoweb, OrderBy = 'Degree','SBM',
+                           title = 'e) Block Model', RemoveTP = TRUE)+ THEME,
+                   PlotFit(demoweb,c('SBM','C_def'),  OrderBy = 'Degree',Combine = '+',
+                           title = 'f) Block and Coverage-Deficit Model', RemoveTP = TRUE)+ THEME,
+                   ncol = 3 )
+
+ggsave('Images/Figure1v2.png', width = 12, height=8, dpi = 300)
+ggsave('Images/Figure1v2.pdf', width = 12, height=8)
+
+
+
+
 ```
+
 
 
